@@ -19,6 +19,7 @@ typedef struct {
 
   float density;
   float mass;
+  float inv_mass;
   float restitution; // value between 0f and 1f
   float area;
 
@@ -82,19 +83,34 @@ void create_vertices(V2 vertices[4], float width, float height) {
   vertices[3] = (V2){left,  bottom};
 }
 
-Body create_box(V2 position, float width, float height, float density, float restitution, SDL_Color color) {
-  Body box = {0};
-  box.position = position;
-  box.density = density;
-  box.restitution = restitution;
-  box.width = width;
-  box.height = height;
-  box.area = width * height;
-  box.mass = box.area * box.density;
-  box.color = color;
-  box.default_color = color;
-  create_vertices(box.vertices, width, height);
-  return box;
+Body create_box(V2 position, float width, float height, float density, float restitution, SDL_Color color, bool is_static) {
+  Body body = {0};
+  body.position = position;
+  body.density = density;
+  body.restitution = restitution;
+  body.width = width;
+  body.height = height;
+  body.area = width * height;
+  body.mass = body.area * body.density;
+  body.color = color;
+  body.default_color = color;
+  create_vertices(body.vertices, width, height);
+
+  body.is_static = is_static;
+  body.color = color;
+  body.default_color = color;
+
+  if(is_static) {
+    body.color = (SDL_Color){255, 0, 255, 255};
+    body.default_color = (SDL_Color){255, 0, 255, 255};
+  }
+
+  body.inv_mass = 1 / body.mass;
+  if(is_static) {
+    body.inv_mass = 0;
+  }
+
+  return body;
 }
 
 #define MIN_BODY_SIZE (0.01f * 0.01f)
@@ -105,25 +121,30 @@ Body create_box(V2 position, float width, float height, float density, float res
 #define WINDOW_WIDTH 1280
 #define WINDOW_HEIGHT 720
 
-float calculate_mass(float area, float density) {
-  return area * density;
-}
+Body create_circle(V2 position, float radius, float density, float restitution, SDL_Color color, bool is_static) {
+  Body body = {0};
+  body.position = position;
+  body.radius = radius;
+  body.density = density;
+  body.restitution = restitution;
+  body.area = SDL_PI_F * radius * radius;
+  body.mass = body.area * body.density;
 
-float calculate_area_circle(float radius) {
-  return 3.14f * radius * radius;
-}
+  body.is_static = is_static;
+  body.color = color;
+  body.default_color = color;
 
-Body create_circle(V2 position, float radius, float density, float restitution, SDL_Color color) {
-  Body circle = {0};
-  circle.position = position;
-  circle.radius = radius;
-  circle.density = density;
-  circle.restitution = restitution;
-  circle.area = calculate_area_circle(radius);
-  circle.mass = calculate_mass(circle.area, circle.density);
-  circle.color = color;
-  circle.default_color = color;
-  return circle;
+  if(is_static) {
+    body.color = (SDL_Color){255, 0, 255, 255};
+    body.default_color = (SDL_Color){255, 0, 255, 255};
+  }
+
+  body.inv_mass = 1 / body.mass;
+  if(is_static) {
+    body.inv_mass = 0;
+  }
+
+  return body;
 }
 
 void draw_circle(SDL_Renderer* renderer, V2 center, float radius, SDL_Color c) {
@@ -402,15 +423,30 @@ void resolve_collision(Body* a, Body* b, V2 normal, float depth) {
   relative_velocity.x = b->linear_velocity.x - a->linear_velocity.x;
   relative_velocity.y = b->linear_velocity.y - a->linear_velocity.y;
 
+  if(v2_dot(relative_velocity, normal) > 0) return;
+
   float e = SDL_min(a->restitution, b->restitution);
   float j = -(1 + e) * v2_dot(relative_velocity, normal);
-  j /= (1 / a->mass) + (1 / b->mass);
 
-  a->linear_velocity.x -= j / a->mass * normal.x;
-  a->linear_velocity.y -= j / a->mass * normal.y;
+  // j /= (1 / a->mass) + (1 / b->mass);
+  
+  // a->linear_velocity.x -= j / a->mass * normal.x;
+  // a->linear_velocity.y -= j / a->mass * normal.y;
+  
+  // b->linear_velocity.x += j / b->mass * normal.x;
+  // b->linear_velocity.y += j / b->mass * normal.y;
+  
+  j /= a->inv_mass + b->inv_mass;
 
-  b->linear_velocity.x += j / b->mass * normal.x;
-  b->linear_velocity.y += j / b->mass * normal.y;
+  V2 impulse = {0,0};
+  impulse.x = j * normal.x;
+  impulse.y = j * normal.y;
+
+  a->linear_velocity.x -= impulse.x * a->inv_mass;
+  a->linear_velocity.y -= impulse.y * a->inv_mass;
+
+  b->linear_velocity.x += impulse.x * b->inv_mass;
+  b->linear_velocity.y += impulse.y * b->inv_mass;
 }
 
 float wrap_value(float value, float min, float max) {
@@ -435,7 +471,10 @@ int main(int argc, char *argv[]) {
   for(int i = 0; i < CIRCLES_COUNT; i++) {
     float density = 1;
     float restitution = 1;
-    circles[i] = create_circle(generate_random_position(), generate_random_radius(), density, restitution, generate_random_color());
+    float radius = generate_random_radius();
+    bool is_static = radius < 20;
+    SDL_Color color = generate_random_color();
+    circles[i] = create_circle(generate_random_position(), radius, density, restitution, color, is_static);
   }
 
   #define RECTS_COUNT 20
@@ -443,7 +482,11 @@ int main(int argc, char *argv[]) {
   for(int i = 0; i < RECTS_COUNT; i++) {
     float density = 1;
     float restitution = 0.1f;
-    rects[i] = create_box(generate_random_position(), generate_random_size(), generate_random_size(), density, restitution, generate_random_color());
+    float width  = generate_random_size();
+    float height = generate_random_size();
+    bool is_static = width < 20;
+    SDL_Color color = generate_random_color();
+    rects[i] = create_box(generate_random_position(), width, height, density, restitution, color, is_static);
   }
 
   while(running) {
@@ -534,16 +577,27 @@ int main(int argc, char *argv[]) {
       for(int j = i + 1; j < CIRCLES_COUNT; j++) {
         Body* b = &circles[j];
 
+        if(a->is_static && b->is_static) continue;
+
         V2 normal;
         float depth;
         if(intersect_circles(*a, *b, &normal, &depth)) {
           a->color = (SDL_Color){230, 10, 10, 255};
           b->color = (SDL_Color){230, 10, 10, 255};
-          float half_depth = depth / 2;
-          a->position.x -= normal.x * half_depth;
-          a->position.y -= normal.y * half_depth;
-          b->position.x += normal.x * half_depth;
-          b->position.y += normal.y * half_depth;
+
+          if(a->is_static) {
+            b->position.x += normal.x * depth;
+            b->position.y += normal.y * depth;
+          } else if(b->is_static) {
+            a->position.x -= normal.x * depth;
+            a->position.y -= normal.y * depth;
+          } else {
+            float half_depth = depth / 2;
+            a->position.x -= normal.x * half_depth;
+            a->position.y -= normal.y * half_depth;
+            b->position.x += normal.x * half_depth;
+            b->position.y += normal.y * half_depth;
+          }
 
           resolve_collision(a, b, normal, depth);
         }
@@ -561,16 +615,27 @@ int main(int argc, char *argv[]) {
       for(int j = i + 1; j < RECTS_COUNT; j++) {
         Body* b = &rects[j];
 
+        if(a->is_static && b->is_static) continue;
+
         V2 normal;
         float depth;
         if(intersect_polygon(a->transformed_vertices, b->transformed_vertices, &normal, &depth)) {
           a->color = (SDL_Color){230, 10, 10, 255};
           b->color = (SDL_Color){230, 10, 10, 255};
-          float half_depth = depth / 2;
-          a->position.x -= normal.x * half_depth;
-          a->position.y -= normal.y * half_depth;
-          b->position.x += normal.x * half_depth;
-          b->position.y += normal.y * half_depth;
+
+          if(a->is_static) {
+            b->position.x += normal.x * depth;
+            b->position.y += normal.y * depth;
+          } else if(b->is_static) {
+            a->position.x -= normal.x * depth;
+            a->position.y -= normal.y * depth;
+          } else {
+            float half_depth = depth / 2;
+            a->position.x -= normal.x * half_depth;
+            a->position.y -= normal.y * half_depth;
+            b->position.x += normal.x * half_depth;
+            b->position.y += normal.y * half_depth;
+          }
         }
       }
     }
@@ -581,16 +646,27 @@ int main(int argc, char *argv[]) {
       for(int j = 0; j < RECTS_COUNT; j++) {
         Body* b = &rects[j];
 
+        if(a->is_static && b->is_static) continue;
+
         V2 normal;
         float depth;
         if(intersect_circle_polygon(a->position, a->radius, b->transformed_vertices, &normal, &depth)) {
           a->color = (SDL_Color){230, 10, 10, 255};
           b->color = (SDL_Color){230, 10, 10, 255};
-          float half_depth = depth / 2;
-          a->position.x -= normal.x * half_depth;
-          a->position.y -= normal.y * half_depth;
-          b->position.x += normal.x * half_depth;
-          b->position.y += normal.y * half_depth;
+
+          if(a->is_static) {
+            b->position.x += normal.x * depth;
+            b->position.y += normal.y * depth;
+          } else if(b->is_static) {
+            a->position.x -= normal.x * depth;
+            a->position.y -= normal.y * depth;
+          } else {
+            float half_depth = depth / 2;
+            a->position.x -= normal.x * half_depth;
+            a->position.y -= normal.y * half_depth;
+            b->position.x += normal.x * half_depth;
+            b->position.y += normal.y * half_depth;
+          }
 
           resolve_collision(a, b, normal, depth);
         }
