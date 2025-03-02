@@ -228,6 +228,9 @@ V2 get_center_polygon(V2 vertices[4]) {
     center.y += vertices[i].y;
   }
 
+  center.x /= 4;
+  center.y /= 4;
+
   return center;
 }
 
@@ -310,6 +313,102 @@ bool intersect_polygon(V2 vertices_a[4], V2 vertices_b[4], V2* normal, float* de
   return true;
 }
 
+void project_circle(V2 center, float radius, V2 axis, float *min, float* max) {
+  V2 direction = v2_normalize(axis);
+  V2 direction_and_radius = {direction.x * radius, direction.y * radius};
+
+  V2 p1 = {center.x + direction_and_radius.x, center.y + direction_and_radius.y};
+  V2 p2 = {center.x - direction_and_radius.x, center.y - direction_and_radius.y};
+
+  // *min = v2_dot(p1, axis);
+  // *max = v2_dot(p2, axis);
+  *min = v2_dot(p1, direction); // added ai
+  *max = v2_dot(p2, direction); // added ai
+
+  if(*min > *max) {
+    float temp = *min;
+    *min = *max;
+    *max = temp;
+  }
+}
+
+int find_closest_point_on_polygon(V2 circle_center, V2 vertices[4]) {
+  int index = -1;
+  float min_distance = (float)SDL_MAX_SINT64;
+
+  for(int i = 0; i < 4; i++) {
+    V2 v = vertices[i];
+    float distance = v2_distance(v, circle_center);
+    if(distance < min_distance) {
+      min_distance = distance;
+      index = i;
+    }
+  }
+
+  return index;
+}
+
+bool intersect_circle_polygon(V2 circle_center, float radius, V2 vertices[4], V2*normal, float* depth) {
+  *normal = (V2){0,0};
+  *depth = (float)SDL_MAX_SINT64;
+
+  for(int i = 0; i < 4; i++) {
+    V2 va = vertices[i];
+    V2 vb = vertices[(i + 1) % 4];
+
+    V2 edge = {vb.x - va.x, vb.y - va.y};
+    V2 axis = {-edge.y, edge.x}; // a.k.a normal vector
+
+    axis = v2_normalize(axis); // added
+
+    float min_a, max_a;
+    project_vertices(vertices, axis, &min_a, &max_a);
+    float min_b, max_b;
+    project_circle(circle_center, radius, axis, &min_b, &max_b);
+
+    if(min_a >= max_b || min_b >= max_a) return false;
+
+    float axis_depth = SDL_min(max_b - min_a, max_a - min_b);
+    if(axis_depth < *depth) {
+      *depth = axis_depth;
+      *normal = axis;
+    }
+  }
+
+  int closest_index = find_closest_point_on_polygon(circle_center, vertices);
+  V2 closest_point = vertices[closest_index];
+
+  V2 axis = {closest_point.x - circle_center.x, closest_point.y - circle_center.y};
+
+  axis = v2_normalize(axis); // added
+
+  float min_a, max_a;
+  project_vertices(vertices, axis, &min_a, &max_a);
+  float min_b, max_b;
+  project_circle(circle_center, radius, axis, &min_b, &max_b);
+
+  if(min_a >= max_b || min_b >= max_a) return false;
+
+  float axis_depth = SDL_min(max_b - min_a, max_a - min_b);
+  if(axis_depth < *depth) {
+    *depth = axis_depth;
+    *normal = axis;
+  }
+
+  // *depth /= v2_length(*normal);
+  // *normal = v2_normalize(*normal);
+
+  V2 center_polygon = get_center_polygon(vertices);
+
+  V2 direction = {center_polygon.x - circle_center.x, center_polygon.y - circle_center.y};
+
+  if(v2_dot(direction, *normal) < 0) {
+    *normal = (V2){-normal->x, -normal->y};
+  }
+
+  return true;
+}
+
 int main(int argc, char *argv[]) {
   SDL_Init(SDL_INIT_VIDEO);
   SDL_Window *window = SDL_CreateWindow("2d Physics Engine!", WINDOW_WIDTH, WINDOW_HEIGHT, 0);
@@ -320,13 +419,13 @@ int main(int argc, char *argv[]) {
   bool running = true;
   Uint64 last_time = SDL_GetTicks();
 
-  #define CIRCLES_COUNT 10
+  #define CIRCLES_COUNT 20
   Body circles[CIRCLES_COUNT] = {0};
   for(int i = 0; i < CIRCLES_COUNT; i++) {
     circles[i] = create_circle(generate_random_position(), generate_random_radius(), 0.5, 1, generate_random_color());
   }
 
-  #define RECTS_COUNT 10
+  #define RECTS_COUNT 20
   Body rects[RECTS_COUNT] = {0};
   for(int i = 0; i < RECTS_COUNT; i++) {
     rects[i] = create_box(generate_random_position(), generate_random_size(), generate_random_size(), 0.5, 1, generate_random_color());
@@ -373,6 +472,8 @@ int main(int argc, char *argv[]) {
         V2 normal;
         float depth;
         if(intersect_circles(*a, *b, &normal, &depth)) {
+          a->color = (SDL_Color){230, 10, 10, 255};
+          b->color = (SDL_Color){230, 10, 10, 255};
           float half_depth = depth / 2;
           a->position.x -= normal.x * half_depth;
           a->position.y -= normal.y * half_depth;
@@ -407,6 +508,26 @@ int main(int argc, char *argv[]) {
       }
     }
 
+    
+    for(int i = 0; i < CIRCLES_COUNT; i++) {
+      Body* a = &circles[i];
+      for(int j = 0; j < RECTS_COUNT; j++) {
+        Body* b = &rects[j];
+
+        V2 normal;
+        float depth;
+        if(intersect_circle_polygon(a->position, a->radius, b->transformed_vertices, &normal, &depth)) {
+          a->color = (SDL_Color){230, 10, 10, 255};
+          b->color = (SDL_Color){230, 10, 10, 255};
+          float half_depth = depth / 2;
+          a->position.x -= normal.x * half_depth;
+          a->position.y -= normal.y * half_depth;
+          b->position.x += normal.x * half_depth;
+          b->position.y += normal.y * half_depth;
+        }
+      }
+    }
+
     ///////////////// Renderer /////////////////////
 
     SDL_SetRenderTarget(renderer, NULL);
@@ -419,6 +540,7 @@ int main(int argc, char *argv[]) {
 
     for(int i = 0; i < CIRCLES_COUNT; i++) {
       draw_circle(renderer, circles[i].position, circles[i].radius, circles[i].color);
+      circles[i].color = circles[i].default_color;
     }
 
     for(int i = 0; i < RECTS_COUNT; i++) {
