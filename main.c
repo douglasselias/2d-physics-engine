@@ -34,6 +34,7 @@ typedef struct {
   // ShapeType shape_type;
 
   SDL_Color color;
+  SDL_Color default_color;
 } Body;
 
 typedef struct {
@@ -98,6 +99,7 @@ Body create_box(V2 position, float width, float height, float density, float res
   box.area = width * height;
   box.mass = box.area * box.density;
   box.color = color;
+  box.default_color = color;
   create_vertices(box.vertices, width, height);
   return box;
 }
@@ -127,6 +129,7 @@ Body create_circle(V2 position, float radius, float density, float restitution, 
   circle.area = calculate_area_circle(radius);
   circle.mass = calculate_mass(circle.area, circle.density);
   circle.color = color;
+  circle.default_color = color;
   return circle;
 }
 
@@ -209,6 +212,62 @@ bool intersect_circles(Body a, Body b, V2* normal, float* depth) {
   return true;
 }
 
+float v2_dot(V2 a, V2 b) {
+  return a.x * b.x + a.y * b.y;
+}
+
+void project_vertices(V2 vertices[4], V2 axis, float* min, float* max) {
+   *min = (float)SDL_MAX_SINT64;
+   *max = (float)SDL_MIN_SINT64;
+
+   for(int j = 0; j < 4; j++) {
+     V2 v = vertices[j];
+     float projection = v2_dot(v, axis);
+
+     if(projection < *min) {
+       *min = projection;
+     }
+     
+     if(projection > *max) { 
+       *max = projection;
+     }
+   }
+}
+
+bool intersect_polygon(V2 vertices_a[4], V2 vertices_b[4]) {
+  for(int i = 0; i < 4; i++) {
+    V2 va = vertices_a[i];
+    V2 vb = vertices_a[(i + 1) % 4];
+
+    V2 edge = {vb.x - va.x, vb.y - va.y};
+    V2 axis = {-edge.y, edge.x}; // a.k.a normal vector
+
+    float min_a, max_a;
+    project_vertices(vertices_a, axis, &min_a, &max_a);
+    float min_b, max_b;
+    project_vertices(vertices_b, axis, &min_b, &max_b);
+
+    if(min_a >= max_b || min_b >= max_a) return false;
+  }
+
+  for(int i = 0; i < 4; i++) {
+    V2 va = vertices_b[i];
+    V2 vb = vertices_b[(i + 1) % 4];
+
+    V2 edge = {vb.x - va.x, vb.y - va.y};
+    V2 axis = {-edge.y, edge.x}; // a.k.a normal vector
+
+    float min_a, max_a;
+    project_vertices(vertices_b, axis, &min_a, &max_a);
+    float min_b, max_b;
+    project_vertices(vertices_b, axis, &min_b, &max_b);
+
+    if(min_a >= max_b || min_b >= max_a) return false;
+  }
+
+  return true;
+}
+
 int main(int argc, char *argv[]) {
   SDL_Init(SDL_INIT_VIDEO);
   SDL_Window *window = SDL_CreateWindow("2d Physics Engine!", WINDOW_WIDTH, WINDOW_HEIGHT, 0);
@@ -247,10 +306,22 @@ int main(int argc, char *argv[]) {
     if(state[SDL_SCANCODE_ESCAPE]) running = false;
 
     float speed = 200;
-    if(state[SDL_SCANCODE_A]) circles[0].position.x -= speed * delta_time;
-    if(state[SDL_SCANCODE_D]) circles[0].position.x += speed * delta_time;
-    if(state[SDL_SCANCODE_W]) circles[0].position.y -= speed * delta_time;
-    if(state[SDL_SCANCODE_S]) circles[0].position.y += speed * delta_time;
+    if(state[SDL_SCANCODE_A]) {
+      circles[0].position.x -= speed * delta_time;
+      rects[0].position.x   -= speed * delta_time;
+    }
+    if(state[SDL_SCANCODE_D]) {
+      circles[0].position.x += speed * delta_time;
+      rects[0].position.x   += speed * delta_time;
+    }
+    if(state[SDL_SCANCODE_W]) {
+      circles[0].position.y -= speed * delta_time;
+      rects[0].position.y   -= speed * delta_time;
+    }
+    if(state[SDL_SCANCODE_S]) {
+      circles[0].position.y += speed * delta_time;
+      rects[0].position.y   += speed * delta_time;
+    }
 
     for(int i = 0; i < CIRCLES_COUNT - 1; i++) {
       Body* a = &circles[i];
@@ -272,8 +343,21 @@ int main(int argc, char *argv[]) {
     for(int i = 0; i < RECTS_COUNT; i++) {
       Body *a = &rects[i];
       a->rotation += SDL_PI_F / 2 * delta_time;
-      // a->transform_update_required = true;
       get_transformed_vertices(a);
+    }
+
+    for(int i = 0; i < RECTS_COUNT - 1; i++) {
+      Body* a = &rects[i];
+      for(int j = i + 1; j < RECTS_COUNT; j++) {
+        Body* b = &rects[j];
+
+        // V2 normal;
+        // float depth;
+        if(intersect_polygon(a->transformed_vertices, b->transformed_vertices)) {
+          a->color = (SDL_Color){230, 10, 10, 255};
+          b->color = (SDL_Color){230, 10, 10, 255};
+        }
+      }
     }
 
     ///////////////// Renderer /////////////////////
@@ -310,6 +394,8 @@ int main(int argc, char *argv[]) {
           SDL_RenderLine(renderer, a.x, a.y, b.x, b.y);
         }
       }
+
+      rects[i].color = rects[i].default_color;
     }
 
     SDL_RenderPresent(renderer);
