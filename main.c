@@ -4,10 +4,10 @@
 typedef SDL_FPoint V2;
 typedef SDL_FRect RECT;
 
-typedef enum {
-  CIRCLE,
-  BOX,
-} ShapeType;
+// typedef enum {
+//   CIRCLE,
+//   BOX,
+// } ShapeType;
 
 typedef struct {
   V2 position;
@@ -26,12 +26,82 @@ typedef struct {
   float width;
   float height;
 
-  ShapeType shape_type;
+  V2 vertices[4];
+  int triangles[6];
+  V2 transformed_vertices[4];
+  bool transform_update_required;
+
+  // ShapeType shape_type;
 
   SDL_Color color;
 } Body;
 
-// typedef struct {} World;
+typedef struct {
+  V2 position;
+  float sine;
+  float cosine;
+} Transform;
+
+Transform create_transform(V2 position, float angle) {
+  Transform t = {0};
+  t.position  = position;
+  t.sine      = sin(angle);
+  t.cosine    = cos(angle);
+  return t;
+}
+
+V2 v2_transform(V2 v, Transform t) {
+  float rx = t.cosine * v.x - t.sine   * v.y;
+  float ry = t.sine   * v.x + t.cosine * v.y;
+
+  float tx = rx + t.position.x;
+  float ty = ry + t.position.y;
+
+  return (V2){tx, ty};
+}
+
+void triangulate_box(int triangles[6]) {
+  triangles[0] = 0;
+  triangles[1] = 1;
+  triangles[2] = 2;
+  triangles[3] = 0;
+  triangles[4] = 2;
+  triangles[5] = 3;
+}
+
+void get_transformed_vertices(Body* a) {
+  Transform t = create_transform(a->position, a->rotation);
+  for(int i = 0; i < 4; i++) {
+    a->transformed_vertices[i] = v2_transform(a->vertices[i], t);
+  }
+}
+
+void create_vertices(V2 vertices[4], float width, float height) {
+  float left   = -width  / 2;
+  float bottom = -height / 2;
+  float right  = left   + width;
+  float top    = bottom + height;
+
+  vertices[0] = (V2){left,  top};
+  vertices[1] = (V2){right, top};
+  vertices[2] = (V2){right, bottom};
+  vertices[3] = (V2){left,  bottom};
+}
+
+Body create_box(V2 position, float width, float height, float density, float restitution, SDL_Color color) {
+  Body box = {0};
+  box.position = position;
+  box.density = density;
+  box.restitution = restitution;
+  box.width = width;
+  box.height = height;
+  box.area = width * height;
+  box.mass = box.area * box.density;
+  box.color = color;
+  create_vertices(box.vertices, width, height);
+  return box;
+}
+
 #define MIN_BODY_SIZE (0.01f * 0.01f)
 #define MAX_BODY_SIZE (64.0f * 64.0f)
 #define MIN_DENSITY 0.5f // g/cm^3
@@ -89,6 +159,10 @@ V2 generate_random_position() {
 }
 
 float generate_random_radius() {
+  return SDL_rand(30) + 15;
+}
+
+float generate_random_size() {
   return SDL_rand(30) + 15;
 }
 
@@ -151,6 +225,12 @@ int main(int argc, char *argv[]) {
     circles[i] = create_circle(generate_random_position(), generate_random_radius(), 0.5, 1, generate_random_color());
   }
 
+  #define RECTS_COUNT 10
+  Body rects[RECTS_COUNT] = {0};
+  for(int i = 0; i < RECTS_COUNT; i++) {
+    rects[i] = create_box(generate_random_position(), generate_random_size(), generate_random_size(), 0.5, 1, generate_random_color());
+  }
+
   while(running) {
     SDL_Event event;
     while(SDL_PollEvent(&event)) {
@@ -189,6 +269,15 @@ int main(int argc, char *argv[]) {
       }
     }
 
+    for(int i = 0; i < RECTS_COUNT; i++) {
+      Body *a = &rects[i];
+      a->rotation += SDL_PI_F / 2 * delta_time;
+      // a->transform_update_required = true;
+      get_transformed_vertices(a);
+    }
+
+    ///////////////// Renderer /////////////////////
+
     SDL_SetRenderTarget(renderer, NULL);
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     SDL_RenderClear(renderer);
@@ -199,6 +288,28 @@ int main(int argc, char *argv[]) {
 
     for(int i = 0; i < CIRCLES_COUNT; i++) {
       draw_circle(renderer, circles[i].position, circles[i].radius, circles[i].color);
+    }
+
+    for(int i = 0; i < RECTS_COUNT; i++) {
+      Body r = rects[i];
+      // V2 p = r.position;
+      // float w = r.width;
+      // float h = r.height;
+      
+      SDL_Color c = r.color;
+      SDL_SetRenderDrawColor(renderer, c.r, c.g, c.b, 255);
+
+      // SDL_FRect rect = {p.x, p.y, w, h};
+      // SDL_RenderFillRect(renderer, &rect);
+      // SDL_RenderLines(renderer,SDL_FPoint *points, count);
+
+      for(int e = 0; e < 4 - 1; e++) {
+        V2 a = r.transformed_vertices[e];
+        for(int w = e + 1; w < 4; w++) {
+          V2 b = r.transformed_vertices[w];
+          SDL_RenderLine(renderer, a.x, a.y, b.x, b.y);
+        }
+      }
     }
 
     SDL_RenderPresent(renderer);
