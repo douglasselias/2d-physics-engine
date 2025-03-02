@@ -15,6 +15,8 @@ typedef struct {
   float rotation;
   float rotation_velocity;
 
+  V2 force;
+
   float density;
   float mass;
   float restitution; // value between 0f and 1f
@@ -59,15 +61,6 @@ V2 v2_transform(V2 v, Transform t) {
   float ty = ry + t.position.y;
 
   return (V2){tx, ty};
-}
-
-void triangulate_box(int triangles[6]) {
-  triangles[0] = 0;
-  triangles[1] = 1;
-  triangles[2] = 2;
-  triangles[3] = 0;
-  triangles[4] = 2;
-  triangles[5] = 3;
 }
 
 void get_transformed_vertices(Body* a) {
@@ -262,6 +255,7 @@ bool intersect_polygon(V2 vertices_a[4], V2 vertices_b[4], V2* normal, float* de
 
     V2 edge = {vb.x - va.x, vb.y - va.y};
     V2 axis = {-edge.y, edge.x}; // a.k.a normal vector
+    axis = v2_normalize(axis);
 
     float min_a, max_a;
     project_vertices(vertices_a, axis, &min_a, &max_a);
@@ -283,6 +277,7 @@ bool intersect_polygon(V2 vertices_a[4], V2 vertices_b[4], V2* normal, float* de
 
     V2 edge = {vb.x - va.x, vb.y - va.y};
     V2 axis = {-edge.y, edge.x}; // a.k.a normal vector
+    axis = v2_normalize(axis);
 
     float min_a, max_a;
     project_vertices(vertices_a, axis, &min_a, &max_a);
@@ -297,9 +292,6 @@ bool intersect_polygon(V2 vertices_a[4], V2 vertices_b[4], V2* normal, float* de
       *normal = axis;
     }
   }
-
-  *depth /= v2_length(*normal);
-  *normal = v2_normalize(*normal);
 
   V2 center_a = get_center_polygon(vertices_a);
   V2 center_b = get_center_polygon(vertices_b);
@@ -358,8 +350,7 @@ bool intersect_circle_polygon(V2 circle_center, float radius, V2 vertices[4], V2
 
     V2 edge = {vb.x - va.x, vb.y - va.y};
     V2 axis = {-edge.y, edge.x}; // a.k.a normal vector
-
-    axis = v2_normalize(axis); // added
+    axis = v2_normalize(axis);
 
     float min_a, max_a;
     project_vertices(vertices, axis, &min_a, &max_a);
@@ -379,8 +370,7 @@ bool intersect_circle_polygon(V2 circle_center, float radius, V2 vertices[4], V2
   V2 closest_point = vertices[closest_index];
 
   V2 axis = {closest_point.x - circle_center.x, closest_point.y - circle_center.y};
-
-  axis = v2_normalize(axis); // added
+  axis = v2_normalize(axis);
 
   float min_a, max_a;
   project_vertices(vertices, axis, &min_a, &max_a);
@@ -395,9 +385,6 @@ bool intersect_circle_polygon(V2 circle_center, float radius, V2 vertices[4], V2
     *normal = axis;
   }
 
-  // *depth /= v2_length(*normal);
-  // *normal = v2_normalize(*normal);
-
   V2 center_polygon = get_center_polygon(vertices);
 
   V2 direction = {center_polygon.x - circle_center.x, center_polygon.y - circle_center.y};
@@ -408,6 +395,30 @@ bool intersect_circle_polygon(V2 circle_center, float radius, V2 vertices[4], V2
 
   return true;
 }
+
+void resolve_collision(Body* a, Body* b, V2 normal, float depth) {
+  V2 relative_velocity = {0,0};
+
+  relative_velocity.x = b->linear_velocity.x - a->linear_velocity.x;
+  relative_velocity.y = b->linear_velocity.y - a->linear_velocity.y;
+
+  float e = SDL_min(a->restitution, b->restitution);
+  float j = -(1 + e) * v2_dot(relative_velocity, normal);
+  j /= (1 / a->mass) + (1 / b->mass);
+
+  a->linear_velocity.x -= j / a->mass * normal.x;
+  a->linear_velocity.y -= j / a->mass * normal.y;
+
+  b->linear_velocity.x += j / b->mass * normal.x;
+  b->linear_velocity.y += j / b->mass * normal.y;
+}
+
+float wrap_value(float value, float min, float max) {
+  float result = value - (max - min) * floorf((value - min)/(max - min));
+  return result;
+}
+
+V2 gravity = {0, 9.81f}; 
 
 int main(int argc, char *argv[]) {
   SDL_Init(SDL_INIT_VIDEO);
@@ -422,13 +433,17 @@ int main(int argc, char *argv[]) {
   #define CIRCLES_COUNT 20
   Body circles[CIRCLES_COUNT] = {0};
   for(int i = 0; i < CIRCLES_COUNT; i++) {
-    circles[i] = create_circle(generate_random_position(), generate_random_radius(), 0.5, 1, generate_random_color());
+    float density = 1;
+    float restitution = 1;
+    circles[i] = create_circle(generate_random_position(), generate_random_radius(), density, restitution, generate_random_color());
   }
 
   #define RECTS_COUNT 20
   Body rects[RECTS_COUNT] = {0};
   for(int i = 0; i < RECTS_COUNT; i++) {
-    rects[i] = create_box(generate_random_position(), generate_random_size(), generate_random_size(), 0.5, 1, generate_random_color());
+    float density = 1;
+    float restitution = 0.1f;
+    rects[i] = create_box(generate_random_position(), generate_random_size(), generate_random_size(), density, restitution, generate_random_color());
   }
 
   while(running) {
@@ -446,24 +461,74 @@ int main(int argc, char *argv[]) {
     const bool *state = SDL_GetKeyboardState(NULL);
     if(state[SDL_SCANCODE_ESCAPE]) running = false;
 
-    float speed = 200;
+    float force_magnitude = 150000 * 5; // dont know why must be a large number....
+    float dx = 0;
+    float dy = 0;
+
+    // float speed = 200;
     if(state[SDL_SCANCODE_A]) {
-      circles[0].position.x -= speed * delta_time;
-      rects[0].position.x   -= speed * delta_time;
+      dx--;
+      // circles[0].position.x -= speed * delta_time;
+      // rects[0].position.x   -= speed * delta_time;
     }
     if(state[SDL_SCANCODE_D]) {
-      circles[0].position.x += speed * delta_time;
-      rects[0].position.x   += speed * delta_time;
+      dx++;
+      // circles[0].position.x += speed * delta_time;
+      // rects[0].position.x   += speed * delta_time;
     }
     if(state[SDL_SCANCODE_W]) {
-      circles[0].position.y -= speed * delta_time;
-      rects[0].position.y   -= speed * delta_time;
+      dy--;
+      // circles[0].position.y -= speed * delta_time;
+      // rects[0].position.y   -= speed * delta_time;
     }
     if(state[SDL_SCANCODE_S]) {
-      circles[0].position.y += speed * delta_time;
-      rects[0].position.y   += speed * delta_time;
+      dy++;
+      // circles[0].position.y += speed * delta_time;
+      // rects[0].position.y   += speed * delta_time;
     }
 
+    // if(dx != 0 || dx != 0) {
+      V2 force_direction = v2_normalize((V2){dx, dy});
+      V2 force = {force_direction.x * force_magnitude, force_direction.y * force_magnitude};
+      circles[0].force.x += force.x;
+      circles[0].force.y += force.y;
+    // }
+
+    //////////////////// Update ///////////////////////
+    for(int i = 0; i < CIRCLES_COUNT; i++) {
+      Body* b = &circles[i];
+      
+      V2 acc = {0,0};
+      acc.x = b->force.x / b->mass;
+      acc.y = b->force.y / b->mass;
+
+      b->linear_velocity.x += acc.x * delta_time;
+      b->linear_velocity.y += acc.y * delta_time;
+
+      b->position.x += b->linear_velocity.x * delta_time;
+      b->position.y += b->linear_velocity.y * delta_time;
+
+      b->rotation += b->rotation_velocity * delta_time;
+
+      /// Don't forget to reset the forces!
+      b->force = (V2){0,0};
+    }
+
+    for(int i = 0; i < RECTS_COUNT; i++) {
+      Body* b = &rects[i];
+      b->linear_velocity.x += b->force.x * delta_time;
+      b->linear_velocity.y += b->force.y * delta_time;
+
+      b->position.x += b->linear_velocity.x * delta_time;
+      b->position.y += b->linear_velocity.y * delta_time;
+
+      b->rotation += b->rotation_velocity * delta_time;
+
+      /// Don't forget to reset the forces!
+      b->force = (V2){0,0};
+    }
+
+    /////////////////////////// Collisions //////////////////////////////
     for(int i = 0; i < CIRCLES_COUNT - 1; i++) {
       Body* a = &circles[i];
       for(int j = i + 1; j < CIRCLES_COUNT; j++) {
@@ -479,6 +544,8 @@ int main(int argc, char *argv[]) {
           a->position.y -= normal.y * half_depth;
           b->position.x += normal.x * half_depth;
           b->position.y += normal.y * half_depth;
+
+          resolve_collision(a, b, normal, depth);
         }
       }
     }
@@ -524,8 +591,23 @@ int main(int argc, char *argv[]) {
           a->position.y -= normal.y * half_depth;
           b->position.x += normal.x * half_depth;
           b->position.y += normal.y * half_depth;
+
+          resolve_collision(a, b, normal, depth);
         }
       }
+    }
+
+    /// Wrap screen ///
+    for(int i = 0; i < CIRCLES_COUNT; i++) {
+      Body* a = &circles[i];
+      a->position.x = wrap_value(a->position.x, 0, WINDOW_WIDTH);
+      a->position.y = wrap_value(a->position.y, 0, WINDOW_HEIGHT);
+    }
+
+    for(int j = 0; j < RECTS_COUNT; j++) {
+      Body* a = &rects[j];
+      a->position.x = wrap_value(a->position.x, 0, WINDOW_WIDTH);
+      a->position.y = wrap_value(a->position.y, 0, WINDOW_HEIGHT);
     }
 
     ///////////////// Renderer /////////////////////
