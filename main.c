@@ -175,7 +175,7 @@ float v2_distance(V2 a, V2 b) {
   return sqrt(dx * dx + dy * dy);
 }
 
-V2 normalize(V2 v) {
+V2 v2_normalize(V2 v) {
   V2 result = {0};
   float length = sqrtf(v.x * v.x + v.y * v.y);
 
@@ -204,7 +204,7 @@ bool intersect_circles(Body a, Body b, V2* normal, float* depth) {
   } else {
     normal->x = b.position.x - a.position.x;
     normal->y = b.position.y - a.position.y;
-    *normal = normalize(*normal);
+    *normal = v2_normalize(*normal);
     
     *depth = radii - distance;
   }
@@ -214,6 +214,21 @@ bool intersect_circles(Body a, Body b, V2* normal, float* depth) {
 
 float v2_dot(V2 a, V2 b) {
   return a.x * b.x + a.y * b.y;
+}
+
+float v2_length(V2 v) {
+  return sqrtf(v.x * v.x + v.y * v.y);
+}
+
+V2 get_center_polygon(V2 vertices[4]) {
+  V2 center = {0,0};
+
+  for(int i = 0; i < 4; i++) {
+    center.x += vertices[i].x;
+    center.y += vertices[i].y;
+  }
+
+  return center;
 }
 
 void project_vertices(V2 vertices[4], V2 axis, float* min, float* max) {
@@ -234,7 +249,10 @@ void project_vertices(V2 vertices[4], V2 axis, float* min, float* max) {
    }
 }
 
-bool intersect_polygon(V2 vertices_a[4], V2 vertices_b[4]) {
+bool intersect_polygon(V2 vertices_a[4], V2 vertices_b[4], V2* normal, float* depth) {
+  *normal = (V2){0,0};
+  *depth = (float)SDL_MAX_SINT64;
+
   for(int i = 0; i < 4; i++) {
     V2 va = vertices_a[i];
     V2 vb = vertices_a[(i + 1) % 4];
@@ -248,6 +266,12 @@ bool intersect_polygon(V2 vertices_a[4], V2 vertices_b[4]) {
     project_vertices(vertices_b, axis, &min_b, &max_b);
 
     if(min_a >= max_b || min_b >= max_a) return false;
+
+    float axis_depth = SDL_min(max_b - min_a, max_a - min_b);
+    if(axis_depth < *depth) {
+      *depth = axis_depth;
+      *normal = axis;
+    }
   }
 
   for(int i = 0; i < 4; i++) {
@@ -258,11 +282,29 @@ bool intersect_polygon(V2 vertices_a[4], V2 vertices_b[4]) {
     V2 axis = {-edge.y, edge.x}; // a.k.a normal vector
 
     float min_a, max_a;
-    project_vertices(vertices_b, axis, &min_a, &max_a);
+    project_vertices(vertices_a, axis, &min_a, &max_a);
     float min_b, max_b;
     project_vertices(vertices_b, axis, &min_b, &max_b);
 
     if(min_a >= max_b || min_b >= max_a) return false;
+
+    float axis_depth = SDL_min(max_b - min_a, max_a - min_b);
+    if(axis_depth < *depth) {
+      *depth = axis_depth;
+      *normal = axis;
+    }
+  }
+
+  *depth /= v2_length(*normal);
+  *normal = v2_normalize(*normal);
+
+  V2 center_a = get_center_polygon(vertices_a);
+  V2 center_b = get_center_polygon(vertices_b);
+
+  V2 direction = {center_b.x - center_a.x, center_b.y - center_a.y};
+
+  if(v2_dot(direction, *normal) < 0) {
+    *normal = (V2){-normal->x, -normal->y};
   }
 
   return true;
@@ -351,11 +393,16 @@ int main(int argc, char *argv[]) {
       for(int j = i + 1; j < RECTS_COUNT; j++) {
         Body* b = &rects[j];
 
-        // V2 normal;
-        // float depth;
-        if(intersect_polygon(a->transformed_vertices, b->transformed_vertices)) {
+        V2 normal;
+        float depth;
+        if(intersect_polygon(a->transformed_vertices, b->transformed_vertices, &normal, &depth)) {
           a->color = (SDL_Color){230, 10, 10, 255};
           b->color = (SDL_Color){230, 10, 10, 255};
+          float half_depth = depth / 2;
+          a->position.x -= normal.x * half_depth;
+          a->position.y -= normal.y * half_depth;
+          b->position.x += normal.x * half_depth;
+          b->position.y += normal.y * half_depth;
         }
       }
     }
