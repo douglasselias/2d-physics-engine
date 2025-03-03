@@ -84,7 +84,8 @@ Body create_box(V2 position, float width, float height, float density, float res
   body.width = width;
   body.height = height;
   body.area = width * height;
-  body.mass = body.area * body.density;
+  // body.mass = body.area * body.density;
+  body.mass = 1;
   body.color = color;
   body.default_color = color;
   create_vertices(body.vertices, width, height);
@@ -121,7 +122,8 @@ Body create_circle(V2 position, float radius, float density, float restitution, 
   body.density = density;
   body.restitution = restitution;
   body.area = SDL_PI_F * radius * radius;
-  body.mass = body.area * body.density;
+  // body.mass = body.area * body.density;
+  body.mass = 1;
 
   body.is_static = is_static;
   body.color = color;
@@ -463,7 +465,45 @@ float wrap_value(float value, float min, float max) {
   return result;
 }
 
-V2 gravity = {0, 9.81f * 100}; 
+V2 gravity = {0, 9.81f * 37500};
+
+typedef struct {
+  V2 min, max;
+} AABB;
+
+AABB get_aabb_circle(Body b) {
+  AABB aabb = {0};
+
+  aabb.min.x = b.position.x - b.radius;
+  aabb.min.y = b.position.y - b.radius;
+
+  aabb.max.x = b.position.x + b.radius;
+  aabb.max.y = b.position.y + b.radius;
+
+  return aabb;
+}
+
+AABB get_aabb_polygon(Body b) {
+  AABB aabb = {0};
+
+  aabb.min.x = (float)SDL_MAX_SINT64;
+  aabb.min.y = (float)SDL_MAX_SINT64;
+
+  aabb.max.x = (float)SDL_MIN_SINT64;
+  aabb.max.y = (float)SDL_MIN_SINT64;
+
+  for(int i = 0; i < 4; i++) {
+    V2 v = b.vertices[i];
+
+    if(v.x < aabb.min.x) aabb.min.x = v.x;
+    if(v.y < aabb.min.y) aabb.min.y = v.y;
+
+    if(v.x > aabb.max.x) aabb.max.x = v.x;
+    if(v.y > aabb.max.y) aabb.max.y = v.y;
+  }
+
+  return aabb;
+}
 
 int main(int argc, char *argv[]) {
   SDL_Init(SDL_INIT_VIDEO);
@@ -535,43 +575,26 @@ int main(int argc, char *argv[]) {
     const bool *state = SDL_GetKeyboardState(NULL);
     if(state[SDL_SCANCODE_ESCAPE]) running = false;
 
-    float force_magnitude = 150000 * 5; // dont know why must be a large number....
-    float dx = 0;
-    float dy = 0;
+    int iterations = 0;
+    int total_iterations = 40;
+    physics_pass:
 
-    if(state[SDL_SCANCODE_A]) {
-      dx--;
-    }
-    if(state[SDL_SCANCODE_D]) {
-      dx++;
-    }
-    if(state[SDL_SCANCODE_W]) {
-      dy--;
-    }
-    if(state[SDL_SCANCODE_S]) {
-      dy++;
-    }
-
-    // if(dx != 0 || dx != 0) {
-      V2 force_direction = v2_normalize((V2){dx, dy});
-      V2 force = {force_direction.x * force_magnitude, force_direction.y * force_magnitude};
-      circles[0].force.x += force.x;
-      circles[0].force.y += force.y;
-    // }
+    delta_time /= total_iterations;
 
     //////////////////// Update ///////////////////////
     for(int i = 0; i < CIRCLES_COUNT; i++) {
       Body* b = &circles[i];
       if(b->is_static) continue;
-      
-      V2 acc = {0,0};
-      acc.x = b->force.x / b->mass;
-      acc.y = b->force.y / b->mass;
 
+      // b->force.y += gravity.y;
+
+      // V2 acc = {
+      //   b->force.x / b->mass,
+      //   b->force.y / b->mass
+      // };
       // b->linear_velocity.x += acc.x * delta_time;
       // b->linear_velocity.y += acc.y * delta_time;
 
-      // b->linear_velocity.x += gravity.x * delta_time;
       b->linear_velocity.y += gravity.y * delta_time;
 
       b->position.x += b->linear_velocity.x * delta_time;
@@ -587,14 +610,16 @@ int main(int argc, char *argv[]) {
       Body* b = &rects[i];
       if(b->is_static) continue;
 
-      V2 acc = {0,0};
-      acc.x = b->force.x / b->mass;
-      acc.y = b->force.y / b->mass;
+      // b->force.y += gravity.y;
+
+      // V2 acc = {
+      //   b->force.x / b->mass,
+      //   b->force.y / b->mass
+      // };
 
       // b->linear_velocity.x += acc.x * delta_time;
       // b->linear_velocity.y += acc.y * delta_time;
 
-      // b->linear_velocity.x += gravity.x * delta_time;
       b->linear_velocity.y += gravity.y * delta_time;
 
       b->position.x += b->linear_velocity.x * delta_time;
@@ -641,7 +666,6 @@ int main(int argc, char *argv[]) {
 
     for(int i = 0; i < RECTS_COUNT; i++) {
       Body *a = &rects[i];
-      // a->rotation += SDL_PI_F / 2 * delta_time;
       get_transformed_vertices(a);
     }
 
@@ -675,7 +699,6 @@ int main(int argc, char *argv[]) {
       }
     }
 
-    
     for(int i = 0; i < CIRCLES_COUNT; i++) {
       Body* a = &circles[i];
       for(int j = 0; j < RECTS_COUNT; j++) {
@@ -708,6 +731,9 @@ int main(int argc, char *argv[]) {
       }
     }
 
+    iterations++;
+    if(iterations < total_iterations) goto physics_pass;
+
     /// Wrap screen ///
     for(int i = 0; i < CIRCLES_COUNT; i++) {
       Body* a = &circles[i];
@@ -736,8 +762,6 @@ int main(int argc, char *argv[]) {
     SDL_RenderClear(renderer);
 
     SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
-    // RECT rect = {0,0, 100, 200};
-    // SDL_RenderFillRect(renderer, &rect);
 
     for(int i = 0; i < CIRCLES_COUNT; i++) {
       draw_circle(renderer, circles[i].position, circles[i].radius, circles[i].color);
@@ -746,16 +770,8 @@ int main(int argc, char *argv[]) {
 
     for(int i = 0; i < RECTS_COUNT; i++) {
       Body r = rects[i];
-      // V2 p = r.position;
-      // float w = r.width;
-      // float h = r.height;
-      
       SDL_Color c = r.color;
       SDL_SetRenderDrawColor(renderer, c.r, c.g, c.b, 255);
-
-      // SDL_FRect rect = {p.x, p.y, w, h};
-      // SDL_RenderFillRect(renderer, &rect);
-      // SDL_RenderLines(renderer,SDL_FPoint *points, count);
 
       for(int e = 0; e < 4 - 1; e++) {
         V2 a = r.transformed_vertices[e];
