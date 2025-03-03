@@ -4,11 +4,6 @@
 typedef SDL_FPoint V2;
 typedef SDL_FRect RECT;
 
-// typedef enum {
-//   CIRCLE,
-//   BOX,
-// } ShapeType;
-
 typedef struct {
   V2 position;
   V2 linear_velocity;
@@ -33,8 +28,6 @@ typedef struct {
   int triangles[6];
   V2 transformed_vertices[4];
   bool transform_update_required;
-
-  // ShapeType shape_type;
 
   SDL_Color color;
   SDL_Color default_color;
@@ -166,6 +159,30 @@ SDL_Color generate_random_color() {
   color.b = (Uint8)SDL_rand(256);
   color.a = 255;
   return color;
+}
+
+SDL_Color raylib_palette[] = {
+  { 253, 249, 0,   255 }, // YELLOW
+  { 255, 203, 0,   255 }, // GOLD
+  { 255, 161, 0,   255 }, // ORANGE
+  { 230, 41,  55,  255 }, // RED
+  { 190, 33,  55,  255 }, // MAROON
+  { 0,   228, 48,  255 }, // GREEN
+  { 0,   158, 47,  255 }, // LIME
+  { 102, 191, 255, 255 }, // SKYBLUE
+  { 0,   121, 241, 255 }, // BLUE
+  { 0,   82,  172, 255 }, // DARKBLUE
+  { 200, 122, 255, 255 }, // PURPLE
+  { 135, 60,  190, 255 }, // VIOLET
+  { 112, 31,  126, 255 }, // DARKPURPLE
+  { 211, 176, 131, 255 }, // BEIGE
+  { 127, 106, 79,  255 }, // BROWN
+};
+
+SDL_Color random_color_from_raylib_palette() {
+  int total_colors = sizeof(raylib_palette) / sizeof(raylib_palette[0]);
+  int color_index = SDL_rand(total_colors);
+  return raylib_palette[color_index];
 }
 
 V2 generate_random_position() {
@@ -335,8 +352,8 @@ void project_circle(V2 center, float radius, V2 axis, float *min, float* max) {
 
   // *min = v2_dot(p1, axis);
   // *max = v2_dot(p2, axis);
-  *min = v2_dot(p1, direction); // added ai
-  *max = v2_dot(p2, direction); // added ai
+  *min = v2_dot(p1, direction); // added, double check if its correct
+  *max = v2_dot(p2, direction); // added, double check if its correct
 
   if(*min > *max) {
     float temp = *min;
@@ -428,14 +445,6 @@ void resolve_collision(Body* a, Body* b, V2 normal, float depth) {
   float e = SDL_min(a->restitution, b->restitution);
   float j = -(1 + e) * v2_dot(relative_velocity, normal);
 
-  // j /= (1 / a->mass) + (1 / b->mass);
-  
-  // a->linear_velocity.x -= j / a->mass * normal.x;
-  // a->linear_velocity.y -= j / a->mass * normal.y;
-  
-  // b->linear_velocity.x += j / b->mass * normal.x;
-  // b->linear_velocity.y += j / b->mass * normal.y;
-  
   j /= a->inv_mass + b->inv_mass;
 
   V2 impulse = {0,0};
@@ -454,7 +463,7 @@ float wrap_value(float value, float min, float max) {
   return result;
 }
 
-V2 gravity = {0, 9.81f}; 
+V2 gravity = {0, 9.81f * 100}; 
 
 int main(int argc, char *argv[]) {
   SDL_Init(SDL_INIT_VIDEO);
@@ -466,41 +475,63 @@ int main(int argc, char *argv[]) {
   bool running = true;
   Uint64 last_time = SDL_GetTicks();
 
-  #define CIRCLES_COUNT 20
+  #define CIRCLES_COUNT 50
   Body circles[CIRCLES_COUNT] = {0};
-  for(int i = 0; i < CIRCLES_COUNT; i++) {
-    float density = 1;
-    float restitution = 1;
-    float radius = generate_random_radius();
-    bool is_static = radius < 20;
-    SDL_Color color = generate_random_color();
-    circles[i] = create_circle(generate_random_position(), radius, density, restitution, color, is_static);
-  }
+  int circles_insert_index = 0;
 
-  #define RECTS_COUNT 20
+  #define RECTS_COUNT 50
   Body rects[RECTS_COUNT] = {0};
-  for(int i = 0; i < RECTS_COUNT; i++) {
+  int rects_insert_index = 0;
+
+  {
     float density = 1;
-    float restitution = 0.1f;
-    float width  = generate_random_size();
-    float height = generate_random_size();
-    bool is_static = width < 20;
-    SDL_Color color = generate_random_color();
-    rects[i] = create_box(generate_random_position(), width, height, density, restitution, color, is_static);
+    float restitution = 0.5f;
+    float width  = WINDOW_WIDTH - 150;
+    float height = 100;
+    bool is_static = true;
+    SDL_Color color = {33, 33, 33, 255};
+    rects[rects_insert_index] = create_box((V2){WINDOW_WIDTH / 2, WINDOW_HEIGHT - height - 10}, width, height, density, restitution, color, is_static);
+    rects_insert_index++;
   }
 
   while(running) {
     SDL_Event event;
     while(SDL_PollEvent(&event)) {
       if(event.type == SDL_EVENT_QUIT) running = false;
+      if(event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
+        bool is_left_click  = event.button.button == SDL_BUTTON_LEFT;
+        bool is_right_click = event.button.button == SDL_BUTTON_RIGHT;
+
+        if(is_left_click) {
+          float density = 1;
+          float restitution = 0.9f;
+          float radius = generate_random_radius();
+          bool is_static = radius < 20;
+          SDL_Color color = random_color_from_raylib_palette();
+          float x, y;
+          SDL_GetMouseState(&x, &y);
+          circles[circles_insert_index] = create_circle((V2){x, y}, radius, density, restitution, color, is_static);
+          circles_insert_index = (circles_insert_index + 1) % CIRCLES_COUNT;
+        } else if(is_right_click) {
+          float density = 1;
+          float restitution = 0.3f;
+          float width  = generate_random_size();
+          float height = generate_random_size();
+          bool is_static = width < 20;
+          SDL_Color color = random_color_from_raylib_palette();
+          float x, y;
+          SDL_GetMouseState(&x, &y);
+          rects[rects_insert_index] = create_box((V2){x, y}, width, height, density, restitution, color, is_static);
+          rects_insert_index = (rects_insert_index + 1) % RECTS_COUNT;
+        }
+      }
     }
 
-    // Time delta for smooth movement
     Uint64 current_time = SDL_GetTicks();
     float delta_time = (current_time - last_time) / 1000.0f; // Seconds
+    // SDL_Log("DT: %.5f\n", delta_time);
     last_time = current_time;
 
-    // Keyboard input for square movement
     const bool *state = SDL_GetKeyboardState(NULL);
     if(state[SDL_SCANCODE_ESCAPE]) running = false;
 
@@ -508,26 +539,17 @@ int main(int argc, char *argv[]) {
     float dx = 0;
     float dy = 0;
 
-    // float speed = 200;
     if(state[SDL_SCANCODE_A]) {
       dx--;
-      // circles[0].position.x -= speed * delta_time;
-      // rects[0].position.x   -= speed * delta_time;
     }
     if(state[SDL_SCANCODE_D]) {
       dx++;
-      // circles[0].position.x += speed * delta_time;
-      // rects[0].position.x   += speed * delta_time;
     }
     if(state[SDL_SCANCODE_W]) {
       dy--;
-      // circles[0].position.y -= speed * delta_time;
-      // rects[0].position.y   -= speed * delta_time;
     }
     if(state[SDL_SCANCODE_S]) {
       dy++;
-      // circles[0].position.y += speed * delta_time;
-      // rects[0].position.y   += speed * delta_time;
     }
 
     // if(dx != 0 || dx != 0) {
@@ -540,13 +562,17 @@ int main(int argc, char *argv[]) {
     //////////////////// Update ///////////////////////
     for(int i = 0; i < CIRCLES_COUNT; i++) {
       Body* b = &circles[i];
+      if(b->is_static) continue;
       
       V2 acc = {0,0};
       acc.x = b->force.x / b->mass;
       acc.y = b->force.y / b->mass;
 
-      b->linear_velocity.x += acc.x * delta_time;
-      b->linear_velocity.y += acc.y * delta_time;
+      // b->linear_velocity.x += acc.x * delta_time;
+      // b->linear_velocity.y += acc.y * delta_time;
+
+      // b->linear_velocity.x += gravity.x * delta_time;
+      b->linear_velocity.y += gravity.y * delta_time;
 
       b->position.x += b->linear_velocity.x * delta_time;
       b->position.y += b->linear_velocity.y * delta_time;
@@ -559,8 +585,17 @@ int main(int argc, char *argv[]) {
 
     for(int i = 0; i < RECTS_COUNT; i++) {
       Body* b = &rects[i];
-      b->linear_velocity.x += b->force.x * delta_time;
-      b->linear_velocity.y += b->force.y * delta_time;
+      if(b->is_static) continue;
+
+      V2 acc = {0,0};
+      acc.x = b->force.x / b->mass;
+      acc.y = b->force.y / b->mass;
+
+      // b->linear_velocity.x += acc.x * delta_time;
+      // b->linear_velocity.y += acc.y * delta_time;
+
+      // b->linear_velocity.x += gravity.x * delta_time;
+      b->linear_velocity.y += gravity.y * delta_time;
 
       b->position.x += b->linear_velocity.x * delta_time;
       b->position.y += b->linear_velocity.y * delta_time;
@@ -606,7 +641,7 @@ int main(int argc, char *argv[]) {
 
     for(int i = 0; i < RECTS_COUNT; i++) {
       Body *a = &rects[i];
-      a->rotation += SDL_PI_F / 2 * delta_time;
+      // a->rotation += SDL_PI_F / 2 * delta_time;
       get_transformed_vertices(a);
     }
 
@@ -676,14 +711,22 @@ int main(int argc, char *argv[]) {
     /// Wrap screen ///
     for(int i = 0; i < CIRCLES_COUNT; i++) {
       Body* a = &circles[i];
-      a->position.x = wrap_value(a->position.x, 0, WINDOW_WIDTH);
-      a->position.y = wrap_value(a->position.y, 0, WINDOW_HEIGHT);
+      if(a->position.x < 0 || a->position.x > WINDOW_WIDTH
+      || a->position.y < 0 || a->position.y > WINDOW_HEIGHT) {
+        a->position = (V2){-100,-100};
+        a->linear_velocity = (V2){0,0};
+        a->is_static = true;
+      }
     }
 
     for(int j = 0; j < RECTS_COUNT; j++) {
       Body* a = &rects[j];
-      a->position.x = wrap_value(a->position.x, 0, WINDOW_WIDTH);
-      a->position.y = wrap_value(a->position.y, 0, WINDOW_HEIGHT);
+      if(a->position.x < 0 || a->position.x > WINDOW_WIDTH
+      || a->position.y < 0 || a->position.y > WINDOW_HEIGHT) {
+        a->position = (V2){-100,-100};
+        a->linear_velocity = (V2){0,0};
+        a->is_static = true;
+      }
     }
 
     ///////////////// Renderer /////////////////////
