@@ -1,5 +1,6 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
+#include <float.h>
 
 #include "src/v2.c"
 
@@ -421,14 +422,16 @@ AABB get_aabb_circle(Body b) {
 AABB get_aabb_polygon(Body b) {
   AABB aabb = {0};
 
-  aabb.min.x = (float)SDL_MAX_SINT64;
-  aabb.min.y = (float)SDL_MAX_SINT64;
+  aabb.min.x = (float)FLT_MAX;
+  aabb.min.y = (float)FLT_MAX;
 
-  aabb.max.x = (float)SDL_MIN_SINT64;
-  aabb.max.y = (float)SDL_MIN_SINT64;
+  aabb.max.x = (float)-FLT_MAX;
+  aabb.max.y = (float)-FLT_MAX;
 
   for(int i = 0; i < 4; i++) {
     V2 v = b.vertices[i];
+    v.x += b.position.x;
+    v.y += b.position.y;
 
     if(v.x < aabb.min.x) aabb.min.x = v.x;
     if(v.y < aabb.min.y) aabb.min.y = v.y;
@@ -438,6 +441,23 @@ AABB get_aabb_polygon(Body b) {
   }
 
   return aabb;
+}
+
+AABB get_aabb(Body b) {
+  switch(b.shape_type) {
+    case CIRCLE: return get_aabb_circle(b);
+    case BOX:    return get_aabb_polygon(b);
+    default:     return (AABB){0};
+  }
+}
+
+bool intersect_aabb(AABB a, AABB b) {
+  if(a.max.x <= b.min.x
+  || b.max.x <= a.min.x
+  || a.max.y <= b.min.y
+  || b.max.y <= a.min.y) return false;
+
+  return true;
 }
 
 typedef struct {
@@ -593,11 +613,15 @@ int main(int argc, char *argv[]) {
 
     for(int i = 0; i < BODIES_COUNT - 1; i++) {
       Body* a = &bodies[i];
+      AABB body_a_aabb = get_aabb(*a);
 
       for(int j = i + 1; j < BODIES_COUNT; j++) {
         Body* b = &bodies[j];
+        AABB body_b_aabb = get_aabb(*b);
 
         if(a->is_static && b->is_static) continue;
+
+        if(!intersect_aabb(body_a_aabb, body_b_aabb)) continue;
 
         bool collided = false;
         V2 normal = {0,0};
