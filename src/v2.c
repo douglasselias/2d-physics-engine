@@ -5,7 +5,7 @@ V2 v2_add(V2 a, V2 b) {
 }
 
 V2 v2_sub(V2 a, V2 b) {
-  return (V2){a.x + b.x, a.y + b.y};
+  return (V2){a.x - b.x, a.y - b.y};
 }
 
 float v2_dot(V2 a, V2 b) {

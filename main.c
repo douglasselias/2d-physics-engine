@@ -441,14 +441,47 @@ AABB get_aabb_polygon(Body b) {
 }
 
 typedef struct {
-  Body body_a;
-  Body body_b;
+  Body* body_a;
+  Body* body_b;
   V2 normal;
   float depth;
-  V2 contact1;
-  V2 contact2;
-  int contact_count;
+  V2* contact1;
+  V2* contact2;
+  int* contact_count;
 } Manifold;
+
+void find_contact_point(Body a, Body b, V2* contact_point) {
+  V2 direction = v2_sub(b.position, a.position);
+  V2 normalized_direction = v2_normalize(direction);
+  *contact_point = (V2){
+    a.position.x + normalized_direction.x * a.radius,
+    a.position.y + normalized_direction.y * a.radius,
+  };
+}
+
+void find_contact_points(Body a, Body b, V2* contact1, V2* contact2, int* contact_count) {
+  *contact1 = (V2){0,0};
+  *contact2 = (V2){0,0};
+  *contact_count = 0;
+
+  ShapeType type_a = a.shape_type;
+  ShapeType type_b = b.shape_type;
+
+  if(type_a == type_b) {
+    switch(type_a) {
+      case CIRCLE:
+        find_contact_point(a, b, contact1);
+        *contact_count = 1;
+        break;
+      case BOX: break;
+    }
+  } else if(type_a != type_b) {
+    switch(type_a) {
+      case CIRCLE: break;
+      case BOX: break;
+    }
+  }
+}
 
 int main(int argc, char *argv[]) {
   SDL_Init(SDL_INIT_VIDEO);
@@ -463,6 +496,10 @@ int main(int argc, char *argv[]) {
   #define BODIES_COUNT 250
   Body bodies[BODIES_COUNT] = {0};
   int bodies_insert_index = 0;
+
+  #define CONTACTS_COUNT 1000
+  Manifold contacts[CONTACTS_COUNT] = {0};
+  int contacts_insert_index = 0;
 
   {
     float density = 1;
@@ -545,6 +582,9 @@ int main(int argc, char *argv[]) {
     }
 
     /////////////////////////// Collisions //////////////////////////////
+    contacts_insert_index = 0;
+    int warning_count = 1;
+
     for(int i = 0; i < BODIES_COUNT; i++) {
       Body *a = &bodies[i];
       if(a->shape_type == BOX)
@@ -567,14 +607,24 @@ int main(int argc, char *argv[]) {
         ShapeType type_b = b->shape_type;
 
         if(type_a == type_b) {
-               if(type_a == CIRCLE) collided = intersect_circles(*a, *b, &normal, &depth);
-          else if(type_a == BOX)    collided = intersect_polygon(*a, *b, &normal, &depth);
+          switch(type_a) {
+            case CIRCLE:
+              collided = intersect_circles(*a, *b, &normal, &depth);
+              break;
+            case BOX:
+              collided = intersect_polygon(*a, *b, &normal, &depth);
+              break;
+          }
         } else if(type_a != type_b) {
-               if(type_a == CIRCLE) collided = intersect_circle_polygon(*a, *b, &normal, &depth);
-          else if(type_a == BOX)    {
-            collided = intersect_circle_polygon(*b, *a, &normal, &depth);
-            normal.x = -normal.x; // Flip normal for b->a order
-            normal.y = -normal.y;
+          switch(type_a) {
+            case CIRCLE:
+              collided = intersect_circle_polygon(*a, *b, &normal, &depth);
+              break;
+            case BOX:
+              collided = intersect_circle_polygon(*b, *a, &normal, &depth);
+              normal.x = -normal.x; // Flip normal for b->a order
+              normal.y = -normal.y;
+              break;
           }
         }
 
@@ -596,9 +646,29 @@ int main(int argc, char *argv[]) {
             b->position.y += normal.y * half_depth;
           }
 
-          resolve_collision(a, b, normal, depth);
+          V2* contact1 = SDL_calloc(sizeof(V2), 1);
+          V2* contact2 = SDL_calloc(sizeof(V2), 1);
+          int* contact_count = SDL_calloc(sizeof(int), 1);
+          find_contact_points(*a, *b, contact1, contact2, contact_count);
+          Manifold manifold = {a, b, normal, depth, contact1, contact2, contact_count};
+          if(contacts_insert_index + 1 < CONTACTS_COUNT) {
+            contacts[contacts_insert_index] = manifold;
+            contacts_insert_index++;
+          } else {
+            SDL_Log("Warning: Not enough size to store all contacts. Warning count: %d\n", warning_count++);
+          }
         }
       }
+    }
+
+    warning_count = 0;
+
+    for(int i = 0; i < contacts_insert_index; i++) {
+      Manifold contact = contacts[i];
+      resolve_collision(contact.body_a, contact.body_b, contact.normal, contact.depth);
+      SDL_free(contact.contact1);
+      SDL_free(contact.contact2);
+      SDL_free(contact.contact_count);
     }
 
     iterations++;
