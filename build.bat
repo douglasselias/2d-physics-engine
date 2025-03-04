@@ -16,7 +16,7 @@ set annoying_warnings=/wd4189 /wd4996 /wd4100 /wd4244 /wd4255 /wd5045 /wd4711 /w
 set system_libs=user32.lib shell32.lib kernel32.lib
 
 @REM cl /nologo /Z7 /diagnostics:caret /sdl /fsanitize=address /Wall /WX /W4 %annoying_warnings% %system_libs% ../main.c /MD /I../vendor /link ../vendor/SDL3.lib /subsystem:console
-cl /nologo /O2 /diagnostics:caret /Wall /WX /W4 %annoying_warnings% %system_libs% ../main.c /MD /I../vendor /link ../vendor/SDL3.lib /subsystem:console
+cl /nologo /O2 /diagnostics:caret /F 4000000 /Wall /WX /W4 %annoying_warnings% %system_libs% ../main.c /MD /I../vendor /link ../vendor/SDL3.lib /subsystem:console
 
 if %ERRORLEVEL% equ 0 (
   xcopy /Y ..\vendor\SDL3.dll .

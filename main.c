@@ -28,6 +28,9 @@ typedef struct {
   float restitution; // value between 0f and 1f
   float area;
 
+  float inertia;
+  float inv_inertia;
+
   bool is_static;
 
   float radius;
@@ -62,8 +65,21 @@ void create_vertices(V2 vertices[4], float width, float height) {
   vertices[3] = (V2){left,  bottom};
 }
 
+float calculate_rotational_inertia(Body body) {
+  switch(body.shape_type) {
+    case CIRCLE: return (1 / 2)  * body.mass * body.radius * body.radius;
+    case BOX:    return (1 / 12) * body.mass * (body.width * body.width + body.height * body.height);
+    default: return 0;
+  }
+}
+
+SDL_Color magenta = {255, 0, 255, 255};
+
 Body create_box(V2 position, float width, float height, float density, float restitution, SDL_Color color, bool is_static) {
   Body body = {0};
+  body.shape_type = BOX;
+  body.is_static = is_static;
+
   body.position = position;
   body.density = density;
   body.restitution = restitution;
@@ -72,31 +88,31 @@ Body create_box(V2 position, float width, float height, float density, float res
   body.area = width * height;
   // body.mass = body.area * body.density;
   body.mass = 1;
+
   body.color = color;
   body.default_color = color;
+
   create_vertices(body.vertices, width, height);
 
-  body.is_static = is_static;
-  body.color = color;
-  body.default_color = color;
-
   if(is_static) {
-    body.color = (SDL_Color){255, 0, 255, 255};
-    body.default_color = (SDL_Color){255, 0, 255, 255};
+    body.color = magenta;
+    body.default_color = magenta;
   }
 
-  body.inv_mass = 1 / body.mass;
-  if(is_static) {
-    body.inv_mass = 0;
+  body.inertia = calculate_rotational_inertia(body);
+  if(!is_static) {
+    body.inv_mass    = 1 / body.mass;
+    body.inv_inertia = 1 / body.inertia;
   }
-
-  body.shape_type = BOX;
 
   return body;
 }
 
 Body create_circle(V2 position, float radius, float density, float restitution, SDL_Color color, bool is_static) {
   Body body = {0};
+  body.shape_type = CIRCLE;
+  body.is_static = is_static;
+
   body.position = position;
   body.radius = radius;
   body.density = density;
@@ -105,21 +121,19 @@ Body create_circle(V2 position, float radius, float density, float restitution, 
   // body.mass = body.area * body.density;
   body.mass = 1;
 
-  body.is_static = is_static;
   body.color = color;
   body.default_color = color;
 
   if(is_static) {
-    body.color = (SDL_Color){255, 0, 255, 255};
-    body.default_color = (SDL_Color){255, 0, 255, 255};
+    body.color = magenta;
+    body.default_color = magenta;
   }
 
-  body.inv_mass = 1 / body.mass;
-  if(is_static) {
-    body.inv_mass = 0;
+  body.inertia = calculate_rotational_inertia(body);
+  if(!is_static) {
+    body.inv_mass    = 1 / body.mass;
+    body.inv_inertia = 1 / body.inertia;
   }
-
-  body.shape_type = CIRCLE;
 
   return body;
 }
@@ -640,7 +654,7 @@ int main(int argc, char *argv[]) {
   Body bodies[BODIES_COUNT] = {0};
   int bodies_insert_index = 0;
 
-  #define CONTACTS_COUNT 1000
+  #define CONTACTS_COUNT 50000
   Manifold contacts[CONTACTS_COUNT] = {0};
   int contacts_insert_index = 0;
 
@@ -651,9 +665,28 @@ int main(int argc, char *argv[]) {
     float height = 100;
     bool is_static = true;
     SDL_Color color = {33, 33, 33, 255};
-    bodies[bodies_insert_index] = create_box((V2){WINDOW_WIDTH / 2, WINDOW_HEIGHT - height - 10}, width, height, density, restitution, color, is_static);
+    V2 position = {
+      WINDOW_WIDTH / 2,
+      WINDOW_HEIGHT - height,
+    };
+    bodies[bodies_insert_index] = create_box(position, width, height, density, restitution, color, is_static);
     bodies_insert_index++;
   }
+
+  // {
+  //   float density = 1;
+  //   float restitution = 0.1f;
+  //   float width  = WINDOW_WIDTH / 2;
+  //   float height = 50;
+  //   bool is_static = true;
+  //   SDL_Color color = {33, 33, 33, 255};
+  //   V2 position = {
+  //     WINDOW_WIDTH / 2 - 400,
+  //     (WINDOW_HEIGHT / 2) + height * 2,
+  //   };
+  //   bodies[bodies_insert_index] = create_box(position, width, height, density, restitution, color, is_static);
+  //   bodies_insert_index++;
+  // }
 
   while(running) {
     SDL_Event event;
@@ -802,6 +835,9 @@ int main(int argc, char *argv[]) {
             contacts[contacts_insert_index] = manifold;
             contacts_insert_index++;
           } else {
+            SDL_free(contact1);
+            SDL_free(contact2);
+            SDL_free(contact_count);
             SDL_Log("Warning: Not enough size to store all contacts. Warning count: %d\n", warning_count++);
           }
         }
