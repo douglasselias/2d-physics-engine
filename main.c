@@ -513,6 +513,76 @@ void find_contact_point_circle_box(Body circle, Body box, V2* contact_point) {
   }
 }
 
+bool float_equals(float a, float b) {
+  return SDL_fabsf(a - b) < 0.0005f;
+  // return SDL_fabsf(a - b) < SDL_FLT_EPSILON;
+}
+
+bool v2_equals(V2 a, V2 b) {
+  bool x = float_equals(a.x, b.x);
+  bool y = float_equals(a.y, b.y);
+  return x && y;
+}
+
+void find_contact_point_box_box(Body a, Body b, V2* contact1, V2* contact2, int* contact_count) {
+  *contact1 = (V2){0,0};
+  *contact2 = (V2){0,0};
+  *contact_count = 0;
+
+  float min_distance_squared = FLT_MAX;
+
+  for(int i = 0; i < 4; i++) {
+    V2 p = a.transformed_vertices[i];
+
+    for(int j = 0; j < 4; j++) {
+      V2 va = b.transformed_vertices[j];
+      V2 vb = b.transformed_vertices[(j + 1) % 4];
+
+      float distance_squared;
+      V2 contact_point;
+      point_segment_distance(p, va, vb, &distance_squared, &contact_point);
+
+      if(float_equals(distance_squared, min_distance_squared)) {
+        if(!v2_equals(contact_point, *contact1)
+        && !v2_equals(contact_point, *contact2)) {
+          *contact2 = contact_point;
+          *contact_count = 2;
+        }
+      } else if(distance_squared < min_distance_squared) {
+        min_distance_squared = distance_squared;
+        *contact_count = 1;
+        *contact1 = contact_point;
+      }
+    }
+  }
+
+
+  for(int i = 0; i < 4; i++) {
+    V2 p = b.transformed_vertices[i];
+
+    for(int j = 0; j < 4; j++) {
+      V2 va = a.transformed_vertices[j];
+      V2 vb = a.transformed_vertices[(j + 1) % 4];
+
+      float distance_squared;
+      V2 contact_point;
+      point_segment_distance(p, va, vb, &distance_squared, &contact_point);
+
+      if(float_equals(distance_squared, min_distance_squared)) {
+        if(!v2_equals(contact_point, *contact1)
+        && !v2_equals(contact_point, *contact2)) {
+          *contact2 = contact_point;
+          *contact_count = 2;
+        }
+      } else if(distance_squared < min_distance_squared) {
+        min_distance_squared = distance_squared;
+        *contact_count = 1;
+        *contact1 = contact_point;
+      }
+    }
+  }
+}
+
 V2 contact_points[1000] = {0};
 int contact_index_temp = 0;
 
@@ -530,7 +600,9 @@ void find_contact_points(Body a, Body b, V2* contact1, V2* contact2, int* contac
         find_contact_point_circles(a, b, contact1);
         *contact_count = 1;
         break;
-      case BOX: break;
+      case BOX:
+        find_contact_point_box_box(a, b, contact1, contact2, contact_count);
+        break;
     }
   } else if(type_a != type_b) {
     switch(type_a) {
@@ -547,6 +619,11 @@ void find_contact_points(Body a, Body b, V2* contact1, V2* contact2, int* contac
 
   contact_points[contact_index_temp] = *contact1;
   contact_index_temp = (contact_index_temp+1) % 1000;
+
+  if(!v2_equals(*contact2, (V2){0,0})) {
+    contact_points[contact_index_temp] = *contact2;
+    contact_index_temp = (contact_index_temp+1) % 1000;
+  }
 }
 
 int main(int argc, char *argv[]) {
