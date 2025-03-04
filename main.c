@@ -470,7 +470,7 @@ typedef struct {
   int* contact_count;
 } Manifold;
 
-void find_contact_point(Body a, Body b, V2* contact_point) {
+void find_contact_point_circles(Body a, Body b, V2* contact_point) {
   V2 direction = v2_sub(b.position, a.position);
   V2 normalized_direction = v2_normalize(direction);
   *contact_point = (V2){
@@ -478,6 +478,43 @@ void find_contact_point(Body a, Body b, V2* contact_point) {
     a.position.y + normalized_direction.y * a.radius,
   };
 }
+
+void point_segment_distance(V2 p, V2 a, V2 b, float* distance_squared, V2* contact_point) {
+  V2 ab = v2_sub(b, a);
+  V2 ap = v2_sub(p, a);
+
+  float projection = v2_dot(ap, ab);
+  float ab_length_squared = v2_length_squared(ab);
+  float d = projection / ab_length_squared;
+
+  if(d <= 0) *contact_point = a;
+  else if(d >= 1) *contact_point = b;
+  else *contact_point = (V2){a.x + ab.x * d, a.y + ab.y * d};
+
+  *distance_squared = v2_distance_squared(p, *contact_point);
+}
+
+void find_contact_point_circle_box(Body circle, Body box, V2* contact_point) {
+  *contact_point = (V2){0,0};
+
+  float min_distance_squared = FLT_MAX;
+
+  for(int i = 0; i < 4; i++) {
+    V2 va = box.transformed_vertices[i];
+    V2 vb = box.transformed_vertices[(i + 1) % 4];
+
+    float distance_squared;
+    V2 contact;
+    point_segment_distance(circle.position, va, vb, &distance_squared, &contact);
+    if(distance_squared < min_distance_squared) {
+      min_distance_squared = distance_squared;
+      *contact_point = contact;
+    }
+  }
+}
+
+V2 contact_points[1000] = {0};
+int contact_index_temp = 0;
 
 void find_contact_points(Body a, Body b, V2* contact1, V2* contact2, int* contact_count) {
   *contact1 = (V2){0,0};
@@ -490,17 +527,26 @@ void find_contact_points(Body a, Body b, V2* contact1, V2* contact2, int* contac
   if(type_a == type_b) {
     switch(type_a) {
       case CIRCLE:
-        find_contact_point(a, b, contact1);
+        find_contact_point_circles(a, b, contact1);
         *contact_count = 1;
         break;
       case BOX: break;
     }
   } else if(type_a != type_b) {
     switch(type_a) {
-      case CIRCLE: break;
-      case BOX: break;
+      case CIRCLE:
+        find_contact_point_circle_box(a, b, contact1);
+        *contact_count = 1;
+        break;
+      case BOX:
+        find_contact_point_circle_box(b, a, contact1);
+        *contact_count = 1;
+        break;
     }
   }
+
+  contact_points[contact_index_temp] = *contact1;
+  contact_index_temp = (contact_index_temp+1) % 1000;
 }
 
 int main(int argc, char *argv[]) {
@@ -736,6 +782,13 @@ int main(int argc, char *argv[]) {
         bodies[i].color = bodies[i].default_color;
       }
     }
+
+    for(int i = 0; i < 1000; i++) {
+      V2 c = contact_points[i];
+      draw_circle(renderer, c, 7, (SDL_Color){255,255,255,255});
+      contact_points[i] = (V2){-100,-100};
+    }
+    contact_index_temp = 0;
 
     SDL_RenderPresent(renderer);
   }

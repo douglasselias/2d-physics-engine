@@ -12,6 +12,10 @@ float v2_dot(V2 a, V2 b) {
   return a.x * b.x + a.y * b.y;
 }
 
+float v2_length_squared(V2 v) {
+  return v.x * v.x + v.y * v.y;
+}
+
 float v2_length(V2 v) {
   return sqrtf(v.x * v.x + v.y * v.y);
 }
@@ -26,6 +30,12 @@ V2 v2_normalize(V2 v) {
   }
 
   return result;
+}
+
+float v2_distance_squared(V2 a, V2 b) {
+  float dx = a.x - b.x;
+  float dy = a.y - b.y;
+  return dx * dx + dy * dy;
 }
 
 float v2_distance(V2 a, V2 b) {
