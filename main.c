@@ -673,20 +673,21 @@ int main(int argc, char *argv[]) {
     bodies_insert_index++;
   }
 
-  // {
-  //   float density = 1;
-  //   float restitution = 0.1f;
-  //   float width  = WINDOW_WIDTH / 2;
-  //   float height = 50;
-  //   bool is_static = true;
-  //   SDL_Color color = {33, 33, 33, 255};
-  //   V2 position = {
-  //     WINDOW_WIDTH / 2 - 400,
-  //     (WINDOW_HEIGHT / 2) + height * 2,
-  //   };
-  //   bodies[bodies_insert_index] = create_box(position, width, height, density, restitution, color, is_static);
-  //   bodies_insert_index++;
-  // }
+  {
+    float density = 1;
+    float restitution = 0.1f;
+    float width  = WINDOW_WIDTH / 2 - 100;
+    float height = 50;
+    bool is_static = true;
+    SDL_Color color = {33, 33, 33, 255};
+    V2 position = {
+      WINDOW_WIDTH / 2 - 300,
+      (WINDOW_HEIGHT / 2),
+    };
+    bodies[bodies_insert_index] = create_box(position, width, height, density, restitution, color, is_static);
+    bodies[bodies_insert_index].rotation = SDL_PI_F * -0.87f;
+    bodies_insert_index++;
+  }
 
   while(running) {
     SDL_Event event;
