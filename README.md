@@ -1,6 +1,3 @@
 # 2d-physics-engine
 
-Drag force
-friction
-
-gravitational, attractor, repeller.
+[Based on this playlist](https://www.youtube.com/playlist?list=PLSlpr6o9vURwq3oxVZSimY8iC-cdd3kIs)
