@@ -46,6 +46,16 @@ typedef struct {
   ShapeType shape_type;
 } Body;
 
+typedef struct {
+  Body* body_a;
+  Body* body_b;
+  V2 normal;
+  float depth;
+  V2 contact1;
+  V2 contact2;
+  int contact_count;
+} Manifold;
+
 void get_transformed_vertices(Body* a) {
   for(int i = 0; i < 4; i++) {
     a->transformed_vertices[i] = v2_transform(a->vertices[i], a->position, a->angle);
@@ -68,7 +78,7 @@ float calculate_rotational_inertia(Body body) {
   switch(body.shape_type) {
     case CIRCLE: return (1 / 2)  * body.mass * body.radius * body.radius;
     case BOX:    return (1 / 12) * body.mass * (body.width * body.width + body.height * body.height);
-    default: return 0;
+    default:     return 0;
   }
 }
 
@@ -390,7 +400,12 @@ bool intersect_circle_polygon(Body a, Body b, V2* normal, float* depth) {
   return true;
 }
 
-void resolve_collision(Body* a, Body* b, V2 normal, float depth) {
+void resolve_collision(Manifold contact) {
+  Body* a = contact.body_a;
+  Body* b = contact.body_b;
+  V2 normal = contact.normal;
+  float depth = contact.depth;
+
   V2 relative_velocity = {0,0};
 
   relative_velocity.x = b->linear_velocity.x - a->linear_velocity.x;
@@ -441,7 +456,9 @@ AABB get_aabb_polygon(Body b) {
   aabb.max.x = (float)-FLT_MAX;
   aabb.max.y = (float)-FLT_MAX;
 
+  // get_transformed_vertices(&b); /// @@
   for(int i = 0; i < 4; i++) {
+    // V2 v = b.transformed_vertices[i]; /// @@
     V2 v = b.vertices[i];
     v.x += b.position.x;
     v.y += b.position.y;
@@ -472,16 +489,6 @@ bool intersect_aabb(AABB a, AABB b) {
 
   return true;
 }
-
-typedef struct {
-  Body* body_a;
-  Body* body_b;
-  V2 normal;
-  float depth;
-  V2* contact1;
-  V2* contact2;
-  int* contact_count;
-} Manifold;
 
 void find_contact_point_circles(Body a, Body b, V2* contact_point) {
   V2 direction = v2_sub(b.position, a.position);
@@ -528,7 +535,6 @@ void find_contact_point_circle_box(Body circle, Body box, V2* contact_point) {
 
 bool float_equals(float a, float b) {
   return SDL_fabsf(a - b) < 0.0005f;
-  // return SDL_fabsf(a - b) < SDL_FLT_EPSILON;
 }
 
 bool v2_equals(V2 a, V2 b) {
@@ -536,10 +542,6 @@ bool v2_equals(V2 a, V2 b) {
   bool y = float_equals(a.y, b.y);
   return x && y;
 }
-
-// bool v2_equals(V2 a, V2 b) {
-//   return v2_distance_squared(a, b) < (0.0005f * 0.0005f);
-// }
 
 void find_contact_point_box_box(Body a, Body b, V2* contact1, V2* contact2, int* contact_count) {
   *contact1 = (V2){0,0};
@@ -643,6 +645,83 @@ void find_contact_points(Body a, Body b, V2* contact1, V2* contact2, int* contac
   }
 }
 
+void resolve_collision_with_rotation(Manifold contact) {
+  Body* body_a = contact.body_a;
+  Body* body_b = contact.body_b;
+  V2 normal = contact.normal;
+  V2 c1 = contact.contact1;
+  V2 c2 = contact.contact2;
+  int contact_count = contact.contact_count;
+
+  float e = SDL_min(body_a->restitution, body_b->restitution);
+
+  V2 contact_list[2] = {c1, c2};
+  V2 impulse_list[2] = {{0,0},{0,0}};
+  V2 ra_list[2] = {};
+  V2 rb_list[2] = {};
+
+  for(int i = 0; i < contact_count; i++) {
+    V2 ra = v2_sub(contact_list[i], body_a->position);
+    V2 rb = v2_sub(contact_list[i], body_b->position);
+    ra_list[i] = ra;
+    rb_list[i] = rb;
+
+    V2 ra_perp = {-ra.y, ra.x};
+    V2 rb_perp = {-rb.y, rb.x};
+
+    V2 ang_linear_vel_a = {ra_perp.x * body_a->angular_velocity, ra_perp.y * body_a->angular_velocity};
+    V2 ang_linear_vel_b = {rb_perp.x * body_b->angular_velocity, rb_perp.y * body_b->angular_velocity};
+
+    V2 relative_velocity = v2_sub(
+      v2_add(body_b->linear_velocity, ang_linear_vel_b),
+      v2_add(body_a->linear_velocity, ang_linear_vel_a)
+    );
+    float contact_vel_mag = v2_dot(relative_velocity, normal);
+
+    if(contact_vel_mag > 0) {
+      continue;
+    }
+
+    float ra_perp_dot_normal = v2_dot(ra_perp, normal);
+    float rb_perp_dot_normal = v2_dot(rb_perp, normal);
+
+    float denom = body_a->inv_mass + body_b->inv_mass + 
+    (ra_perp_dot_normal * ra_perp_dot_normal) * body_a->inv_inertia +
+    (rb_perp_dot_normal * rb_perp_dot_normal) * body_b->inv_inertia;
+
+    if(denom < SDL_FLT_EPSILON) continue;
+
+    float j = -(1 + e) * contact_vel_mag;
+    j /= denom;
+    j /= (float)contact_count == 0 ? 1 : contact_count;
+
+    V2 impulse = {normal.x * j, normal.y * j};
+    impulse_list[i] = impulse;
+  }
+
+  for(int i = 0; i < contact_count; i++) {
+    V2 impulse = impulse_list[i];
+    V2 ra = ra_list[i];
+    V2 rb = rb_list[i];
+
+    body_a->linear_velocity = v2_add(body_a->linear_velocity, (V2){-impulse.x * body_a->inv_mass, -impulse.y * body_a->inv_mass});
+    body_b->linear_velocity = v2_add(body_b->linear_velocity, (V2){ impulse.x * body_b->inv_mass,  impulse.y * body_b->inv_mass});
+
+    // V2 temp_a = v2_add(body_a->linear_velocity, (V2){-impulse.x * body_a->inv_mass, -impulse.y * body_a->inv_mass});
+    // body_a->linear_velocity.x = temp_a.x;
+    // body_a->linear_velocity.y = temp_a.y;
+
+    // V2 temp_b = v2_add(body_b->linear_velocity, (V2){ impulse.x * body_b->inv_mass,  impulse.y * body_b->inv_mass});
+    // body_b->linear_velocity.x = temp_b.x;
+    // body_b->linear_velocity.y = temp_b.y;
+
+    float cross_a = v2_cross(ra, impulse);
+    float cross_b = v2_cross(rb, impulse);
+    body_a->angular_velocity += -cross_a * body_a->inv_inertia;
+    body_b->angular_velocity +=  cross_b * body_b->inv_inertia;
+  }
+}
+
 int main(int argc, char *argv[]) {
   SDL_Init(SDL_INIT_VIDEO);
   SDL_Window *window = SDL_CreateWindow("2d Physics Engine!", WINDOW_WIDTH, WINDOW_HEIGHT, 0);
@@ -656,10 +735,6 @@ int main(int argc, char *argv[]) {
   #define BODIES_COUNT 250
   Body bodies[BODIES_COUNT] = {0};
   int bodies_insert_index = 0;
-
-  #define CONTACTS_COUNT 50000
-  Manifold contacts[CONTACTS_COUNT] = {0};
-  int contacts_insert_index = 0;
 
   {
     float density = 1;
@@ -704,18 +779,19 @@ int main(int argc, char *argv[]) {
         float density = 1;
         float restitution = 0.9f;
         float radius = generate_random_radius();
-        bool is_static = radius < 20;
+        // bool is_static = radius < 20;
+        bool is_static = false;
         float width  = generate_random_size();
         float height = generate_random_size();
 
-        float x, y;
-        SDL_GetMouseState(&x, &y);
+        V2 mouse_position = {};
+        SDL_GetMouseState(&mouse_position.x, &mouse_position.y);
 
         if(is_left_click) {
-          bodies[bodies_insert_index] = create_circle((V2){x, y}, radius, density, restitution, color, is_static);
+          bodies[bodies_insert_index] = create_circle(mouse_position, radius, density, restitution, color, is_static);
           bodies_insert_index = (bodies_insert_index + 1) % BODIES_COUNT;
         } else if(is_right_click) {
-          bodies[bodies_insert_index] = create_box((V2){x, y}, width, height, density, restitution, color, is_static);
+          bodies[bodies_insert_index] = create_box(mouse_position, width, height, density, restitution, color, is_static);
           bodies_insert_index = (bodies_insert_index + 1) % BODIES_COUNT;
         }
       }
@@ -736,7 +812,7 @@ int main(int argc, char *argv[]) {
 
     //////////////////// Update ///////////////////////
 
-    for(int i = 0; i < BODIES_COUNT; i++) {
+    for(int i = 0; i < bodies_insert_index; i++) {
       Body* b = &bodies[i];
       if(b->is_static) continue;
 
@@ -762,20 +838,18 @@ int main(int argc, char *argv[]) {
     }
 
     /////////////////////////// Collisions //////////////////////////////
-    contacts_insert_index = 0;
-    int warning_count = 1;
 
-    for(int i = 0; i < BODIES_COUNT; i++) {
+    for(int i = 0; i < bodies_insert_index; i++) {
       Body *a = &bodies[i];
       // a->angle += SDL_PI_F / 2 * delta_time;
       get_transformed_vertices(a);
     }
 
-    for(int i = 0; i < BODIES_COUNT - 1; i++) {
+    for(int i = 0; i < bodies_insert_index - 1; i++) {
       Body* a = &bodies[i];
       AABB body_a_aabb = get_aabb(*a);
 
-      for(int j = i + 1; j < BODIES_COUNT; j++) {
+      for(int j = i + 1; j < bodies_insert_index; j++) {
         Body* b = &bodies[j];
         AABB body_b_aabb = get_aabb(*b);
 
@@ -816,6 +890,8 @@ int main(int argc, char *argv[]) {
           a->color = (SDL_Color){230, 10, 10, 255};
           b->color = (SDL_Color){230, 10, 10, 255};
 
+          if (depth > 50.0f) depth = 50.0f; /// @@
+
           if(a->is_static) {
             b->position.x += normal.x * depth;
             b->position.y += normal.y * depth;
@@ -830,50 +906,28 @@ int main(int argc, char *argv[]) {
             b->position.y += normal.y * half_depth;
           }
 
-          V2* contact1 = SDL_calloc(sizeof(V2), 1);
-          V2* contact2 = SDL_calloc(sizeof(V2), 1);
-          int* contact_count = SDL_calloc(sizeof(int), 1);
-          find_contact_points(*a, *b, contact1, contact2, contact_count);
+          V2 contact1 = {0};
+          V2 contact2 = {0};
+          int contact_count = 0;
+          find_contact_points(*a, *b, &contact1, &contact2, &contact_count);
           Manifold contact = {a, b, normal, depth, contact1, contact2, contact_count};
 
-          resolve_collision(contact.body_a, contact.body_b, contact.normal, contact.depth);
-          SDL_free(contact1);
-          SDL_free(contact2);
-          SDL_free(contact_count);
-
-          // if(contacts_insert_index + 1 < CONTACTS_COUNT) {
-          //   contacts[contacts_insert_index] = manifold;
-          //   contacts_insert_index++;
-          // } else {
-          //   SDL_free(contact1);
-          //   SDL_free(contact2);
-          //   SDL_free(contact_count);
-          //   SDL_Log("Warning: Not enough size to store all contacts. Warning count: %d\n", warning_count++);
-          // }
+          resolve_collision(contact);
+          // resolve_collision_with_rotation(contact);
         }
       }
     }
 
-    warning_count = 0;
-
-    // for(int i = 0; i < contacts_insert_index; i++) {
-    //   Manifold contact = contacts[i];
-    //   resolve_collision(contact.body_a, contact.body_b, contact.normal, contact.depth);
-    //   SDL_free(contact.contact1);
-    //   SDL_free(contact.contact2);
-    //   SDL_free(contact.contact_count);
-    // }
-
     iterations++;
     if(iterations < total_iterations) goto physics_pass;
 
-    /// Soft delete ///
-    for(int i = 0; i < BODIES_COUNT; i++) {
+    // / Soft delete ///
+    for(int i = 0; i < bodies_insert_index; i++) {
       Body* a = &bodies[i];
-      if(a->position.x < 0 || a->position.x > WINDOW_WIDTH
-      || a->position.y < 0 || a->position.y > WINDOW_HEIGHT) {
-        a->position = (V2){-100,-100};
-        a->linear_velocity = (V2){0,0};
+      if(a->position.x < -100 || a->position.x > WINDOW_WIDTH  + 100
+      || a->position.y < -100 || a->position.y > WINDOW_HEIGHT + 100) {
+        // SDL_Log("soft delete: index %d, x %.2f y %.2f, is box %d\n", i, a->position.x, a->position.y, a->shape_type == BOX);
+        // a->linear_velocity = (V2){0,0};
         a->is_static = true;
       }
     }
@@ -886,9 +940,13 @@ int main(int argc, char *argv[]) {
 
     SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
 
-    for(int i = 0; i < BODIES_COUNT; i++) {
+    for(int i = 0; i < bodies_insert_index; i++) {
       if(bodies[i].shape_type == CIRCLE) {
-        draw_circle(renderer, bodies[i].position, bodies[i].radius, bodies[i].color);
+        V2 center = bodies[i].position;
+        float radius = bodies[i].radius;
+        draw_circle(renderer, center, radius, bodies[i].color);
+        SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+        SDL_RenderLine(renderer, center.x, center.y, center.x + radius, center.y);
         bodies[i].color = bodies[i].default_color;
       } else if(bodies[i].shape_type == BOX) {
         SDL_Color c = bodies[i].color;
@@ -906,11 +964,11 @@ int main(int argc, char *argv[]) {
       }
     }
 
-    for(int i = 0; i < 1000; i++) {
-      V2 c = contact_points[i];
-      draw_circle(renderer, c, 7, (SDL_Color){255,255,255,255});
-      contact_points[i] = (V2){-100,-100};
-    }
+    // for(int i = 0; i < 1000; i++) {
+    //   V2 c = contact_points[i];
+    //   draw_circle(renderer, c, 7, (SDL_Color){255,255,255,255});
+    //   contact_points[i] = (V2){-100,-100};
+    // }
     contact_index_temp = 0;
 
     SDL_RenderPresent(renderer);

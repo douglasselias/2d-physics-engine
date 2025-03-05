@@ -8,8 +8,16 @@ V2 v2_sub(V2 a, V2 b) {
   return (V2){a.x - b.x, a.y - b.y};
 }
 
+V2 v2_mult(V2 a, V2 b) {
+  return (V2){a.x * b.x, a.y * b.y};
+}
+
 float v2_dot(V2 a, V2 b) {
   return a.x * b.x + a.y * b.y;
+}
+
+float v2_cross(V2 a, V2 b) {
+  return a.x * b.y - a.y * b.x;
 }
 
 float v2_length_squared(V2 v) {
