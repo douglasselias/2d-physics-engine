@@ -17,8 +17,8 @@ typedef enum {
 typedef struct {
   V2 position;
   V2 linear_velocity;
-  float rotation;
-  float rotation_velocity;
+  float angle;
+  float angular_velocity;
 
   V2 force;
 
@@ -38,7 +38,6 @@ typedef struct {
   float height;
 
   V2 vertices[4];
-  int triangles[6];
   V2 transformed_vertices[4];
 
   SDL_Color color;
@@ -49,7 +48,7 @@ typedef struct {
 
 void get_transformed_vertices(Body* a) {
   for(int i = 0; i < 4; i++) {
-    a->transformed_vertices[i] = v2_transform(a->vertices[i], a->position, a->rotation);
+    a->transformed_vertices[i] = v2_transform(a->vertices[i], a->position, a->angle);
   }
 }
 
@@ -538,6 +537,10 @@ bool v2_equals(V2 a, V2 b) {
   return x && y;
 }
 
+// bool v2_equals(V2 a, V2 b) {
+//   return v2_distance_squared(a, b) < (0.0005f * 0.0005f);
+// }
+
 void find_contact_point_box_box(Body a, Body b, V2* contact1, V2* contact2, int* contact_count) {
   *contact1 = (V2){0,0};
   *contact2 = (V2){0,0};
@@ -685,7 +688,7 @@ int main(int argc, char *argv[]) {
       (WINDOW_HEIGHT / 2),
     };
     bodies[bodies_insert_index] = create_box(position, width, height, density, restitution, color, is_static);
-    bodies[bodies_insert_index].rotation = SDL_PI_F * -0.87f;
+    bodies[bodies_insert_index].angle = SDL_PI_F * -0.87f;
     bodies_insert_index++;
   }
 
@@ -752,7 +755,7 @@ int main(int argc, char *argv[]) {
       b->position.x += b->linear_velocity.x * delta_time;
       b->position.y += b->linear_velocity.y * delta_time;
 
-      b->rotation += b->rotation_velocity * delta_time;
+      b->angle += b->angular_velocity * delta_time;
 
       /// Don't forget to reset the forces!
       b->force = (V2){0,0};
@@ -764,8 +767,8 @@ int main(int argc, char *argv[]) {
 
     for(int i = 0; i < BODIES_COUNT; i++) {
       Body *a = &bodies[i];
-      if(a->shape_type == BOX)
-        get_transformed_vertices(a);
+      // a->angle += SDL_PI_F / 2 * delta_time;
+      get_transformed_vertices(a);
     }
 
     for(int i = 0; i < BODIES_COUNT - 1; i++) {
@@ -831,29 +834,35 @@ int main(int argc, char *argv[]) {
           V2* contact2 = SDL_calloc(sizeof(V2), 1);
           int* contact_count = SDL_calloc(sizeof(int), 1);
           find_contact_points(*a, *b, contact1, contact2, contact_count);
-          Manifold manifold = {a, b, normal, depth, contact1, contact2, contact_count};
-          if(contacts_insert_index + 1 < CONTACTS_COUNT) {
-            contacts[contacts_insert_index] = manifold;
-            contacts_insert_index++;
-          } else {
-            SDL_free(contact1);
-            SDL_free(contact2);
-            SDL_free(contact_count);
-            SDL_Log("Warning: Not enough size to store all contacts. Warning count: %d\n", warning_count++);
-          }
+          Manifold contact = {a, b, normal, depth, contact1, contact2, contact_count};
+
+          resolve_collision(contact.body_a, contact.body_b, contact.normal, contact.depth);
+          SDL_free(contact1);
+          SDL_free(contact2);
+          SDL_free(contact_count);
+
+          // if(contacts_insert_index + 1 < CONTACTS_COUNT) {
+          //   contacts[contacts_insert_index] = manifold;
+          //   contacts_insert_index++;
+          // } else {
+          //   SDL_free(contact1);
+          //   SDL_free(contact2);
+          //   SDL_free(contact_count);
+          //   SDL_Log("Warning: Not enough size to store all contacts. Warning count: %d\n", warning_count++);
+          // }
         }
       }
     }
 
     warning_count = 0;
 
-    for(int i = 0; i < contacts_insert_index; i++) {
-      Manifold contact = contacts[i];
-      resolve_collision(contact.body_a, contact.body_b, contact.normal, contact.depth);
-      SDL_free(contact.contact1);
-      SDL_free(contact.contact2);
-      SDL_free(contact.contact_count);
-    }
+    // for(int i = 0; i < contacts_insert_index; i++) {
+    //   Manifold contact = contacts[i];
+    //   resolve_collision(contact.body_a, contact.body_b, contact.normal, contact.depth);
+    //   SDL_free(contact.contact1);
+    //   SDL_free(contact.contact2);
+    //   SDL_free(contact.contact_count);
+    // }
 
     iterations++;
     if(iterations < total_iterations) goto physics_pass;
